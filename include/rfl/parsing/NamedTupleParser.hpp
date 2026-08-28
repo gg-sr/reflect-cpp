@@ -15,6 +15,7 @@
 #include "../internal/is_default_val_v.hpp"
 #include "../internal/is_extra_fields.hpp"
 #include "../internal/is_skip.hpp"
+#include "../internal/no_extra_fields_v.hpp"
 #include "../internal/nth_element_t.hpp"
 #include "../internal/ptr_cast.hpp"
 #include "../to_view.hpp"
@@ -284,6 +285,9 @@ struct NamedTupleParser {
       using U = std::remove_cvref_t<typename ExtraFieldsType::Type>;
       _schema->additional_properties_ = std::make_shared<schema::Type>(
           Parser<R, W, U, ProcessorsType>::to_schema(_definitions));
+    } else if constexpr (internal::no_extra_fields_v<ProcessorsType> &&
+                         !_no_field_names) {
+      _schema->additional_properties_ = false;
     }
   }
 
