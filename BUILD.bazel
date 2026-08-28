@@ -1,0 +1,80 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+_FORMATS = {
+    "avro": False,
+    "boost_serialization": False,
+    "bson": False,
+    "capnproto": False,
+    "cbor": False,
+    "cereal": False,
+    "flexbuf": False,
+    "json": [":yyjson"],
+    "msgpack": False,
+    "toml": ["@tomlplusplus"],
+    "ubjson": False,
+    "xml": False,
+    "yaml": False,
+    "yas": False,
+}
+
+cc_library(
+    name = "reflect-cpp",
+    hdrs = glob([
+        "include/rfl/*.hpp",
+        "include/rfl/atomic/*.hpp",
+        "include/rfl/generic/*.hpp",
+        "include/rfl/internal/**/*.hpp",
+        "include/rfl/io/*.hpp",
+        "include/rfl/parsing/**/*.hpp",
+        "include/rfl/thirdparty/enchantum/*.hpp",  # spell-checker: disable-line
+        "include/rfl/thirdparty/enchantum/details/*.hpp",  # spell-checker: disable-line
+    ], exclude = [
+        "include/rfl/PatternValidator.hpp",
+    ] + [
+        "include/rfl/{}.hpp".format(format)
+        for format in _FORMATS
+    ]),
+    srcs = [
+        # https://github.com/getml/reflect-cpp/blob/v0.25.0/src/reflectcpp.cpp
+        "src/rfl/Generic.cpp",
+        "src/rfl/generic/Writer.cpp",
+        "src/rfl/internal/strings/strings.cpp",
+        "src/rfl/parsing/schema/Type.cpp",
+        "src/rfl/parsing/schemaful/tuple_to_object.cpp",  # spell-checker: disable-line
+    ],
+    strip_include_prefix = "include",
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "pattern-validator",
+    hdrs = [
+        "include/rfl/PatternValidator.hpp",
+        "include/rfl/thirdparty/ctre.hpp",  # spell-checker: disable-line
+    ],
+    deps = [":reflect-cpp"],
+    strip_include_prefix = "include",
+    visibility = ["//visibility:public"],
+)
+
+[
+    cc_library(
+        name = format,
+        hdrs = ["include/rfl/{}.hpp".format(format)] + glob(["include/rfl/{}/**/*.hpp".format(format)]),
+        deps = [":reflect-cpp"] + format_deps,
+        srcs = glob(["src/rfl/{}/*.cpp".format(format)]),
+        strip_include_prefix = "include",
+        visibility = ["//visibility:public"],
+    )
+    for format, format_deps in _FORMATS.items()
+    if format_deps != False
+]
+
+cc_library(
+    name = "yyjson",
+    hdrs = ["include/rfl/thirdparty/yyjson.h"],
+    srcs = ["src/yyjson.c"],
+    strip_include_prefix = "include/rfl/thirdparty",
+)
+
+# spell-checker: ignore thirdparty yyjson
