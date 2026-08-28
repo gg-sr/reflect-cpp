@@ -8,6 +8,8 @@
 #include "../config.hpp"
 #include "../enums.hpp"
 #include "../internal/enum_names_only_v.hpp"
+#include "../internal/enums/Names.hpp"
+#include "../internal/enums/get_enum_names.hpp"
 #include "../internal/enums/is_flag_enum.hpp"
 #include "../internal/enums/is_scoped_enum.hpp"
 #include "../internal/has_reflector.hpp"
@@ -30,6 +32,11 @@ struct ParserEnum {
   using InputVarType = typename R::InputVarType;
 
   using ParentType = Parent<W>;
+
+  /// The renaming applied to the enumerators, if one of the processors asks
+  /// for one.
+  using EnumNameTransform =
+      internal::enums::enum_name_transform_t<ProcessorsType>;
 
   /**
    * @brief Reads an enum from the input.
@@ -61,8 +68,9 @@ struct ParserEnum {
           .transform([](const auto _val) { return static_cast<T>(_val); });
     } else {
       return _r.template to_basic_type<std::string>(_var).and_then(
-          rfl::string_to_enum<T, internal::enum_names_only_v<
-              ProcessorsType>>);
+          rfl::string_to_enum<T,
+                              internal::enum_names_only_v<ProcessorsType>,
+                              EnumNameTransform>);
     }
   }
 
@@ -84,7 +92,7 @@ struct ParserEnum {
       const auto val = static_cast<std::underlying_type_t<T>>(_var);
       ParentType::add_value(_w, val, _parent);
     } else {
-      const auto str = rfl::enum_to_string(_var);
+      const auto str = rfl::enum_to_string<T, EnumNameTransform>(_var);
       ParentType::add_value(_w, str, _parent);
     }
   }
@@ -119,7 +127,8 @@ struct ParserEnum {
     } else if constexpr (config::enum_descriptions<U>::has_descriptions) {
       // Generate DescribedLiteral for enums with descriptions
       auto described = Type::DescribedLiteral{};
-      constexpr auto enumerators = get_enumerator_array<U>();
+      constexpr auto enumerators =
+          get_enumerator_array<U, EnumNameTransform>();
       for (const auto& [name, value] : enumerators) {
         auto desc = config::enum_descriptions<U>::get(value);
         described.values_.push_back(
@@ -131,7 +140,8 @@ struct ParserEnum {
     } else {
       return Parser<
           R, W,
-          typename decltype(internal::enums::get_enum_names<U>())::Literal,
+          typename decltype(internal::enums::get_transformed_enum_names<
+              U, EnumNameTransform>())::Literal,
           ProcessorsType>::to_schema(_definitions);
     }
   }
