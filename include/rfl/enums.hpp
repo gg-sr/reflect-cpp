@@ -1,8 +1,10 @@
 #ifndef RFL_ENUMS_HPP_
 #define RFL_ENUMS_HPP_
 
+#include <optional>
 #include <sstream>
 #include <string>
+#include <type_traits>
 
 #include "Result.hpp"
 #include "internal/enums/from_string.hpp"
@@ -16,34 +18,34 @@ namespace rfl {
 
 // Returns a named tuple mapping names of enumerators of the given enum type to
 // their values.
-template <class EnumType>
+template <class EnumType, class Transform = void>
 auto get_enumerators() {
   return internal::enums::names_to_enumerator_named_tuple(
-      internal::enums::get_enum_names<EnumType>());
+      internal::enums::get_transformed_enum_names<EnumType, Transform>());
 }
 
 // Returns a named tuple mapping names of enumerators of the given enum type to
 // their underlying values.
-template <class EnumType>
+template <class EnumType, class Transform = void>
 auto get_underlying_enumerators() {
   return internal::enums::names_to_underlying_enumerator_named_tuple(
-      internal::enums::get_enum_names<EnumType>());
+      internal::enums::get_transformed_enum_names<EnumType, Transform>());
 }
 
 // Returns an std::array containing pairs of enumerator names (as
 // std::string_view) and values.
-template <class EnumType>
+template <class EnumType, class Transform = void>
 constexpr auto get_enumerator_array() {
   return internal::enums::names_to_enumerator_array(
-      internal::enums::get_enum_names<EnumType>());
+      internal::enums::get_transformed_enum_names<EnumType, Transform>());
 }
 
 // Returns an std::array containing pairs of enumerator names (as
 // std::string_view) and underlying values.
-template <class EnumType>
+template <class EnumType, class Transform = void>
 constexpr auto get_underlying_enumerator_array() {
   return internal::enums::names_to_underlying_enumerator_array(
-      internal::enums::get_enum_names<EnumType>());
+      internal::enums::get_transformed_enum_names<EnumType, Transform>());
 }
 
 // Returns the range of the given enum type as a pair of the minimum and maximum
@@ -53,8 +55,27 @@ constexpr auto get_enum_range() {
 }
 
 // Converts an enum value to tis string representation.
-template <class EnumType>
+//
+// `Transform` renames the enumerators; it is the processor-provided
+// transformation obtained through `internal::enums::enum_name_transform_t`.
+template <class EnumType, class Transform = void>
 std::string enum_to_string(const EnumType _enum) {
+  const auto to_string = [](const EnumType _e) -> std::string {
+    if constexpr (std::is_void_v<Transform>) {
+      return internal::enums::to_string(_e);
+    } else {
+      // The renamed enumerators are only known to `get_enumerator_array`, so
+      // they have to be looked up there rather than through the backend.
+      constexpr auto enumerators = get_enumerator_array<EnumType, Transform>();
+      for (const auto& [name, value] : enumerators) {
+        if (value == _e) {
+          return std::string(name);
+        }
+      }
+      return std::to_string(static_cast<std::underlying_type_t<EnumType>>(_e));
+    }
+  };
+
   if constexpr (internal::enums::is_flag_enum<EnumType>) {
     // Iterates through the enum bit by bit and matches it against the flags.
     using T = std::underlying_type_t<EnumType>;
@@ -64,8 +85,7 @@ std::string enum_to_string(const EnumType _enum) {
     while (val != 0) {
       const auto bit = val & static_cast<T>(1);
       if (bit == 1) {
-        auto str = internal::enums::to_string(
-            static_cast<EnumType>(static_cast<T>(1) << i));
+        auto str = to_string(static_cast<EnumType>(static_cast<T>(1) << i));
         flags.emplace_back(std::move(str));
       }
       ++i;
@@ -76,7 +96,7 @@ std::string enum_to_string(const EnumType _enum) {
     }
     return internal::strings::join("|", flags);
   } else {
-    return internal::enums::to_string(_enum);
+    return to_string(_enum);
   }
 }
 
@@ -88,14 +108,18 @@ std::string enum_to_string(const EnumType _enum) {
 // will produce the cast value 4). Pass enum_names_only = true (or use the
 // EnumNamesOnly processor with a parser) to accept only the declared
 // enumerator names instead.
-template <class EnumType, bool enum_names_only = false>
+//
+// `Transform` renames the enumerators; it is the processor-provided
+// transformation obtained through `internal::enums::enum_name_transform_t`.
+template <class EnumType, bool enum_names_only = false,
+          class Transform = void>
 Result<EnumType> string_to_enum(const std::string& _str) {
   const auto make_error_msg = [&](const auto& name) {
     std::string msg = "Invalid enum value: '";
     msg += name;
     msg += "'. Must be one of [";
     const char* sep = "";
-    for (const auto& p : get_enumerator_array<EnumType>()) {
+    for (const auto& p : get_enumerator_array<EnumType, Transform>()) {
       msg += sep;
       msg += p.first;
       sep = ", ";
@@ -104,9 +128,25 @@ Result<EnumType> string_to_enum(const std::string& _str) {
     return error(msg);
   };
 
+  const auto from_string = [](const std::string& name) {
+    if constexpr (std::is_void_v<Transform>) {
+      return internal::enums::from_string<EnumType>(name);
+    } else {
+      // The renamed enumerators are only known to `get_enumerator_array`, so
+      // they have to be looked up there rather than through the backend.
+      constexpr auto enumerators = get_enumerator_array<EnumType, Transform>();
+      for (const auto& [enumerator, value] : enumerators) {
+        if (enumerator == name) {
+          return std::optional<EnumType>(value);
+        }
+      }
+      return std::optional<EnumType>();
+    }
+  };
+
   const auto cast_numbers_or_names =
       [&](const std::string& name) -> Result<EnumType> {
-    const auto r = internal::enums::from_string<EnumType>(name);
+    const auto r = from_string(name);
     if (r) {
       return *r;
     }
