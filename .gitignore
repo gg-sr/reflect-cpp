@@ -40,6 +40,10 @@
 **/build/**
 **/build_clang/**
 
+# Bazel
+/bazel-*
+/external
+
 # Output files
 *.avro
 *.bson

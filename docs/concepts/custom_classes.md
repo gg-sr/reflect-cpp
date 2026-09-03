@@ -6,7 +6,7 @@ that. If your class is more than a trivial, behaviorless struct, you often want 
 If you want your class to be supported by reflect-cpp, it needs to have the following:
 
 1) It needs to publicly define a type called `ReflectionType` using `using` or `typedef`.
-2) It needs to have a constructor that accepts your `ReflectionType` as an argument.
+2) It needs to have a constructor that accepts your `ReflectionType` as an argument, or a static method `from_reflection()` that accepts it and returns your class.
 3) It needs to contain a method called `reflection` that returns said `ReflectionType` (or a reference thereto).
 
 If you class fulfills these three conditions, then it is fully supported by all serialization and deserialization
@@ -129,3 +129,53 @@ class Person {
       int age;
 };
 ```
+
+## Example 4: Keeping your class an aggregate
+
+Declaring a constructor makes your class a non-aggregate, which costs you
+designated-initializer and aggregate initialization:
+
+```cpp
+struct Config {
+    Config(ReflectionType&&);   // this makes Config a non-aggregate...
+    int port;
+    bool tls;
+};
+
+// ...so this no longer compiles
+auto config = Config{.port = 443, .tls = true};
+```
+
+If you want to keep those, provide a static `from_reflection()` factory instead
+of a constructor:
+
+```cpp
+struct Config {
+    struct ConfigImpl {
+        rfl::Rename<"portNumber", int> port;
+        bool tls;
+    };
+
+    // 1) Publicly define `ReflectionType`
+    using ReflectionType = ConfigImpl;
+
+    // 2) A static factory, instead of a constructor
+    static Config from_reflection(const ReflectionType& _impl) {
+        return Config{.port = _impl.port(), .tls = _impl.tls};
+    }
+
+    // 3) Method called `reflection` that returns `ReflectionType`
+    ReflectionType reflection() const {
+        return ReflectionType{.port = port, .tls = tls};
+    }
+
+    int port;
+    bool tls;
+};
+
+// Config is still an aggregate, so this keeps working
+auto config = Config{.port = 443, .tls = true};
+```
+
+If a class provides both a `from_reflection()` factory and a converting
+constructor, the factory is used.
