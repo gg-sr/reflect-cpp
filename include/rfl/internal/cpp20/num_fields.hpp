@@ -78,12 +78,22 @@ struct any {
   constexpr operator T() const noexcept;
 };
 
+/// Like `any`, but never converts to `T` itself, so that a single argument cannot select `T`'s
+/// copy or move constructor instead of aggregate-initializing its first field.
+template <class T>
+struct any_but {
+  any_but(std::size_t);
+  template <class U>
+    requires(!std::is_same_v<std::remove_cvref_t<U>, std::remove_cv_t<T>>)
+  constexpr operator U() const noexcept;
+};
+
 template <typename T>
 struct CountFieldsHelper {
   template <std::size_t n>
   static consteval bool constructible() {
     return []<std::size_t... is>(std::index_sequence<is...>) {
-      return requires { T{any(is)...}; };
+      return std::is_constructible_v<T, decltype(any_but<T>(is))...>;
     }(std::make_index_sequence<n>());
   }
 

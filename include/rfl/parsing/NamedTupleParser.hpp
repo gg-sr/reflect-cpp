@@ -11,12 +11,16 @@
 #include "../Result.hpp"
 #include "../internal/default_if_missing_v.hpp"
 #include "../internal/has_default_val_v.hpp"
+#include "../internal/has_reflection_method_v.hpp"
+#include "../internal/has_reflection_type_v.hpp"
 #include "../internal/is_attribute.hpp"
 #include "../internal/is_default_val_v.hpp"
 #include "../internal/is_extra_fields.hpp"
 #include "../internal/is_skip.hpp"
+#include "../internal/no_extra_fields_v.hpp"
 #include "../internal/nth_element_t.hpp"
 #include "../internal/ptr_cast.hpp"
+#include "../num_fields.hpp"
 #include "../to_view.hpp"
 #include "AreReaderAndWriter.hpp"
 #include "Parent.hpp"
@@ -37,6 +41,35 @@ namespace rfl {
 template <class... Ps>
 Generic to_generic(const auto& _t);
 
+namespace internal {
+
+/// Satisfied by a type that carries a nested `ReflectionType` and can be
+/// unwrapped by decomposing it, like `rfl::Validator`.
+template <class T>
+concept IsReflectionTypeWrapper =
+    // We use `std::is_aggregate_v` and `num_fields` rather than `requires`
+    // because `requires`, well, requires an expression, but checking this via
+    // syntax would require a statement `const auto& [_] = _t`, which is not
+    // allowed in a `requires` clause.
+    has_reflection_type_v<T> && !has_reflection_method_v<T> &&
+    std::is_aggregate_v<T> && num_fields<T> == 1;
+
+/// Satisfied when the generic writer can serialize `T`, i.e. when a schema
+/// `default` can be produced for it. Everything is writable except a type
+/// carrying a nested `ReflectionType` without a `reflection()` method.
+template <class T>
+concept CanWriteGeneric =
+    !has_reflection_type_v<std::remove_cvref_t<T>> ||
+    has_reflection_method_v<std::remove_cvref_t<T>> ||
+    IsReflectionTypeWrapper<std::remove_cvref_t<T>>;
+
+/// Satisfied when a schema `default` can be emitted for the field type `T`:
+/// it must be a `DefaultVal` that satisfies `CanWriteGeneric`.
+template <class T>
+concept CanEmitDefault =
+    is_default_val_v<T> && CanWriteGeneric<typename T::Type>;
+
+}  // namespace internal
 }  // namespace rfl
 
 namespace rfl::parsing {
@@ -246,12 +279,12 @@ struct NamedTupleParser {
     if constexpr (!internal::is_skip_v<U> && !internal::is_extra_fields_v<U>) {
       // Add default value here
       auto s = Parser<R, W, U, ProcessorsType>::to_schema(_definitions);
-      if constexpr (!std::is_same_v<View, void>) {
+      if constexpr (!std::is_same_v<View, void> && internal::CanEmitDefault<U>) {
         s.variant_.visit([&](auto& value) {
           if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>,
                                        schema::Type::DefaultVal>) {
             value.default_value_ =
-                rfl::to_generic((*rfl::get<_i>(*_view)).get());
+                rfl::to_generic<ProcessorsType>((*rfl::get<_i>(*_view)).get());
           }
         });
       }
@@ -284,6 +317,9 @@ struct NamedTupleParser {
       using U = std::remove_cvref_t<typename ExtraFieldsType::Type>;
       _schema->additional_properties_ = std::make_shared<schema::Type>(
           Parser<R, W, U, ProcessorsType>::to_schema(_definitions));
+    } else if constexpr (internal::no_extra_fields_v<ProcessorsType> &&
+                         !_no_field_names) {
+      _schema->additional_properties_ = false;
     }
   }
 
